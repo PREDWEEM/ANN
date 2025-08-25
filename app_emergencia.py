@@ -5,7 +5,38 @@ import pandas as pd
 from pathlib import Path
 import plotly.graph_objects as go
 
-st.set_page_config(page_title="PREDICCION EMERGENCIA AGRICOLA LOLIUM SP", layout="wide")
+# ========= Page config (sin enlaces de menú) =========
+st.set_page_config(
+    page_title="PREDICCION EMERGENCIA AGRICOLA LOLIUM SP",
+    layout="wide",
+    menu_items={  # desactiva enlaces del menú
+        "Get help": None,
+        "Report a bug": None,
+        "About": None
+    }
+)
+
+# ========= Ocultar menú, footer, toolbar y badges (anti GitHub/edit) =========
+st.markdown(
+    """
+    <style>
+    /* Oculta el menú hamburguesa */
+    #MainMenu {visibility: hidden;}
+
+    /* Oculta el footer por defecto */
+    footer {visibility: hidden;}
+
+    /* Oculta la toolbar superior (a veces muestra "View source") */
+    header [data-testid="stToolbar"] {visibility: hidden;}
+
+    /* Oculta el badge de "Made with Streamlit" / "Manage app" (Cloud) */
+    .viewerBadge_container__1QSob {visibility: hidden;}
+    .st-emotion-cache-9aoz2h {visibility: hidden;}  /* selector alternativo según versión */
+    .stAppDeployButton {display: none;}              /* botón desplegar/editar si existiera */
+    </style>
+    """,
+    unsafe_allow_html=True
+)
 
 # =================== Modelo ANN ===================
 class PracticalANNModel:
@@ -61,7 +92,7 @@ class PracticalANNModel:
         })
 
 # =================== Config de fuentes (CSV público) ===================
-# URLs ajustadas al repo que mencionaste (no se muestran en la UI)
+# (No se muestran en la UI)
 CSV_URL_PAGES = "https://PREDWEEM.github.io/ANN/meteo_daily.csv"
 CSV_URL_RAW   = "https://raw.githubusercontent.com/PREDWEEM/ANN/gh-pages/meteo_daily.csv"
 
@@ -79,7 +110,7 @@ def load_public_csv():
             return df, url
         except Exception as e:
             last_err = e
-    raise RuntimeError(f"No pude leer el CSV ni desde Pages ni desde Raw. Último error: {last_err}")
+    raise RuntimeError("No se pudo leer el CSV público desde las fuentes configuradas.")
 
 def validar_columnas(df: pd.DataFrame) -> tuple[bool, str]:
     req = {"Julian_days", "TMAX", "TMIN", "Prec"}
@@ -107,76 +138,38 @@ def load_weights(base_dir: Path):
 # =================== UI ===================
 st.title("PREDICCION EMERGENCIA AGRICOLA LOLIUM SP")
 
-st.sidebar.header("Fuente de datos")
-fuente = st.sidebar.radio("Elegí la fuente", ["Automático (CSV público)", "Subir Excel"])
-
-st.sidebar.header("Configuración")
-umbral_usuario = st.sidebar.number_input(
-    "Umbral de EMEAC para 100%",
-    min_value=1.2, max_value=3.0, value=2.70, step=0.01, format="%.2f"
-)
-
-st.sidebar.header("Validaciones")
-mostrar_fuera_rango = st.sidebar.checkbox("Avisar datos fuera de rango de entrenamiento", value=False)
-
-# Botón para forzar recarga de datos cacheados
-if st.sidebar.button("Forzar recarga de datos"):
-    st.cache_data.clear()
+# (Opciones reducidas: evitamos mostrar fuentes, enlaces o botones “peligrosos”)
+with st.sidebar:
+    st.header("Configuración")
+    umbral_usuario = st.number_input(
+        "Umbral de EMEAC para 100%",
+        min_value=1.2, max_value=3.0, value=2.70, step=0.01, format="%.2f"
+    )
+    st.header("Validaciones")
+    mostrar_fuera_rango = st.checkbox("Avisar datos fuera de rango de entrenamiento", value=False)
 
 # Cargar pesos del modelo
 try:
     base = Path(__file__).parent if "__file__" in globals() else Path.cwd()
     IW, bias_IW, LW, bias_out = load_weights(base)
-except FileNotFoundError as e:
-    st.error(
-        "Error al cargar archivos del modelo (IW.npy, bias_IW.npy, LW.npy, bias_out.npy). "
-        f"Ruta buscada: {base}. Detalle: {e}"
-    )
+except FileNotFoundError:
+    st.error("Error al cargar archivos del modelo. Verifique que IW.npy, bias_IW.npy, LW.npy y bias_out.npy estén junto al script.")
     st.stop()
 
 modelo = PracticalANNModel(IW, bias_IW, LW, bias_out)
 
-# =================== Obtener DataFrames ===================
-dfs = []  # lista de (nombre, df)
-
-if fuente == "Automático (CSV público)":
-    try:
-        df_auto, url_usada = load_public_csv()
-        dfs.append(("MeteoBahia_CSV", df_auto))
-        # NO mostrar nada de la fuente ni del rango
-    except Exception as e:
-        st.error(f"No se pudo leer el CSV público (Pages ni Raw). Detalle: {e}")
-else:
-    uploaded_files = st.file_uploader(
-        "Sube uno o más archivos Excel (.xlsx) con columnas: Julian_days, TMAX, TMIN, Prec",
-        type=["xlsx"], accept_multiple_files=True
-    )
-    if uploaded_files:
-        for file in uploaded_files:
-            df_up = pd.read_excel(file)
-            ok, msg = validar_columnas(df_up)
-            if not ok:
-                st.warning(f"{file.name}: {msg}")
-                continue
-            # Coerción a numérico por robustez
-            cols = ["Julian_days", "TMAX", "TMIN", "Prec"]
-            df_up[cols] = df_up[cols].apply(pd.to_numeric, errors="coerce")
-            bad = df_up[cols].isna().any(axis=1).sum()
-            if bad:
-                st.warning(f"{file.name}: {bad} filas con valores inválidos fueron excluidas.")
-                df_up = df_up.dropna(subset=cols)
-
-            if "Fecha" not in df_up.columns:
-                year = pd.Timestamp.now().year
-                df_up["Fecha"] = pd.to_datetime(f"{year}-01-01") + pd.to_timedelta(df_up["Julian_days"] - 1, unit="D")
-            dfs.append((Path(file.name).stem, df_up))
-    else:
-        st.info("Sube al menos un archivo .xlsx para iniciar el análisis.")
+# =================== Datos (solo automático desde CSV público) ===================
+dfs = []
+try:
+    df_auto, _ = load_public_csv()
+    dfs.append(("MeteoBahia_CSV", df_auto))
+except Exception as e:
+    st.error("No se pudo leer el CSV público. Intente más tarde o revise la fuente.")
+    st.stop()
 
 # =================== Procesamiento y gráficos ===================
 if dfs:
     for nombre, df in dfs:
-        # Validación + orden
         ok, msg = validar_columnas(df)
         if not ok:
             st.warning(f"{nombre}: {msg}")
@@ -184,7 +177,6 @@ if dfs:
 
         df = df.sort_values("Julian_days").reset_index(drop=True)
 
-        # Entradas al modelo
         X_real = df[["Julian_days", "TMAX", "TMIN", "Prec"]].to_numpy(dtype=float)
         fechas = pd.to_datetime(df["Fecha"])
 
@@ -207,15 +199,7 @@ if dfs:
 
         # --- Rango 1/feb → 1/sep (reinicio) ---
         years = pred["Fecha"].dt.year.unique()
-        if len(years) == 1:
-            yr = int(years[0])
-        else:
-            yr = int(st.sidebar.selectbox(
-                "Año a mostrar (reinicio 1/feb → 1/sep)",
-                sorted(years),
-                key=f"year_select_{nombre}"  # clave única por dataset
-            ))
-
+        yr = int(years[0]) if len(years) == 1 else int(sorted(years)[0])
         fecha_inicio_rango = pd.Timestamp(year=yr, month=2, day=1)
         fecha_fin_rango    = pd.Timestamp(year=yr, month=9, day=1)
 
@@ -239,11 +223,10 @@ if dfs:
         pred_vis["EMERREL_MA5_rango"] = pred_vis["EMERREL(0-1)"].rolling(window=5, min_periods=1).mean()
         colores_vis = obtener_colores(pred_vis["Nivel_Emergencia_relativa"])
 
-        # --------- Gráfico 1: EMERGENCIA RELATIVA DIARIA (Plotly interactivo) ---------
+        # --------- Gráfico 1: EMERGENCIA RELATIVA DIARIA ---------
         st.subheader("EMERGENCIA RELATIVA DIARIA - BORDENAVE")
 
         fig_er = go.Figure()
-
         fig_er.add_bar(
             x=pred_vis["Fecha"],
             y=pred_vis["EMERREL(0-1)"],
@@ -317,11 +300,10 @@ if dfs:
 
         st.plotly_chart(fig_er, use_container_width=True, theme="streamlit")
 
-        # --------- Gráfico 2: EMEAC (rango) - Plotly interactivo ---------
+        # --------- Gráfico 2: EMEAC (rango) ---------
         st.subheader("EMERGENCIA ACUMULADA DIARIA - BORDENAVE")
 
         fig = go.Figure()
-
         fig.add_trace(go.Scatter(
             x=pred_vis["Fecha"],
             y=pred_vis["EMEAC (%) - máximo (rango)"],
@@ -339,7 +321,6 @@ if dfs:
             name="Mínimo (reiniciado)",
             hovertemplate="Fecha: %{x|%d-%b-%Y}<br>Mínimo: %{y:.1f}%<extra></extra>"
         ))
-
         fig.add_trace(go.Scatter(
             x=pred_vis["Fecha"],
             y=pred_vis["EMEAC (%) - ajustable (rango)"],
@@ -348,7 +329,6 @@ if dfs:
             hovertemplate="Fecha: %{x|%d-%b-%Y}<br>Ajustable: %{y:.1f}%<extra></extra>",
             line=dict(width=2.5)
         ))
-
         fig.add_trace(go.Scatter(
             x=pred_vis["Fecha"],
             y=pred_vis["EMEAC (%) - mínimo (rango)"],
@@ -357,7 +337,6 @@ if dfs:
             line=dict(dash="dash", width=1.5),
             hovertemplate="Fecha: %{x|%d-%b-%Y}<br>Mínimo: %{y:.1f}%<extra></extra>"
         ))
-
         fig.add_trace(go.Scatter(
             x=pred_vis["Fecha"],
             y=pred_vis["EMEAC (%) - máximo (rango)"],
@@ -366,7 +345,6 @@ if dfs:
             line=dict(dash="dash", width=1.5),
             hovertemplate="Fecha: %{x|%d-%b-%Y}<br>Máximo: %{y:.1f}%<extra></extra>"
         ))
-
         for nivel in [25, 50, 75, 90]:
             fig.add_hline(y=nivel, line_dash="dash", opacity=0.6, annotation_text=f"{nivel}%")
 
@@ -382,7 +360,7 @@ if dfs:
 
         st.plotly_chart(fig, use_container_width=True, theme="streamlit")
 
-        # --------- Tabla (emojis SOLO en vista) y descarga (texto limpio) ---------
+        # --------- Tabla y descarga ---------
         st.subheader(f"Resultados (1/feb → 1/sep) - {nombre}")
 
         col_emeac = "EMEAC (%) - ajustable (rango)" if "EMEAC (%) - ajustable (rango)" in pred_vis.columns else "EMEAC (%) - ajustable"
@@ -394,21 +372,13 @@ if dfs:
             }
         )
 
-        # Mapa de emojis SOLO para visualización
         nivel_emoji = {"Bajo": "🟢", "Medio": "🟡", "Alto": "🔴"}
-        nivel_con_emoji = tabla_base["Nivel de EMERREL"].map(lambda x: f"{nivel_emoji.get(x, '')} {x}")
-
-        # Tabla para mostrar (con emoji)
         tabla_display = tabla_base.copy()
-        tabla_display["Nivel de EMERREL"] = nivel_con_emoji
-
-        # Tabla para exportar (solo texto limpio)
-        tabla_csv = tabla_base.copy()
+        tabla_display["Nivel de EMERREL"] = tabla_display["Nivel de EMERREL"].map(lambda x: f"{nivel_emoji.get(x, '')} {x}")
 
         st.dataframe(tabla_display, use_container_width=True)
 
-        # Descarga CSV (solo texto limpio en 'Nivel de EMERREL')
-        csv = tabla_csv.to_csv(index=False).encode("utf-8")
+        csv = tabla_base.to_csv(index=False).encode("utf-8")
         st.download_button(
             f"Descargar resultados (rango) - {nombre}",
             csv,
